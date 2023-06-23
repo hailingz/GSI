@@ -61,7 +61,10 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
 !   2017-11-16  dutta   - addition of profile quality flags for KOMPSAT5 GPSRO.
 !   2019-08-21  Shao    - add qc flags input for METOP-C, COSMIC-2 and PAZ
 !   2020-05-21  Shao    - add qc flags input for commercial GNSSRO data
-!
+!   2021-03-26  H.Zhang - add new variables that are needed in JEDI, include:
+!                         LEO instrument, GNSS satellite classification,data generating center,
+!                         LEO azimuth angle, ascending flag
+!   2021-05-19  H.Zhang - use originating center for QC flag; no need to add satellite id
 !   input argument list:
 !     infile   - unit from which to read BUFR data
 !     lunout   - unit to which to write data for further processing
@@ -102,7 +105,7 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
 
 ! Declare local parameters  
   integer(i_kind),parameter:: maxlevs=500
-  integer(i_kind),parameter:: maxinfo=16
+  integer(i_kind),parameter:: maxinfo=21
   real(r_kind),parameter:: r10000=10000.0_r_kind
   real(r_kind),parameter:: r360=360.0_r_kind
 
@@ -116,6 +119,7 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
 
   
   integer(i_kind) lnbufr,i,k,m,maxobs,ireadmg,ireadsb,said,ptid
+  integer(i_kind) siid,sclf,ogce,ascd
   integer(i_kind) nmrecs
   integer(i_kind) notgood,idate
   integer(i_kind) iret,levs,levsr,nreps_ROSEQ1,mincy,minobs
@@ -134,18 +138,19 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
   real(r_kind) pcc,qfro,usage,dlat,dlat_earth,dlon,dlon_earth,freq_chk,freq
   real(r_kind) dlat_earth_deg,dlon_earth_deg
   real(r_kind) height,rlat,rlon,ref,bend,impact,roc,geoid,&
-               bend_error,ref_error,bend_pccf,ref_pccf
+               bend_error,ref_error,bend_pccf,ref_pccf,azim
 
   real(r_kind),allocatable,dimension(:,:):: cdata_all
  
-  integer(i_kind),parameter:: n1ahdr=10
+  integer(i_kind),parameter:: n1ahdr=13
   real(r_double),dimension(n1ahdr):: bfr1ahdr
   real(r_double),dimension(50,maxlevs):: data1b
   real(r_double),dimension(50,maxlevs):: data2a
   real(r_double),dimension(maxlevs):: nreps_this_ROSEQ2
  
   data lnbufr/10/
-  data hdr1a / 'YEAR MNTH DAYS HOUR MINU PCCF ELRC SAID PTID GEODU' / 
+  data hdr1a / 'YEAR MNTH DAYS HOUR MINU PCCF ELRC SAID SIID PTID GEODU SCLF OGCE'/ 
+
   data nemo /'QFRO'/
   
 !***********************************************************************************
@@ -222,8 +227,12 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
         pcc=bfr1ahdr(6)         ! profile per cent confidence
         roc=bfr1ahdr(7)         ! Earth local radius of curvature
         said=bfr1ahdr(8)        ! Satellite identifier
-        ptid=bfr1ahdr(9)        ! Platform transmitter ID number
-        geoid=bfr1ahdr(10)      ! Geoid undulation
+        siid = bfr1ahdr(9)      ! Satellite instrument
+        ptid = bfr1ahdr(10)     ! Platform transmitter ID number
+        geoid= bfr1ahdr(11)     ! Geoid undulation
+        sclf = bfr1ahdr(12)     ! GNSS satellite classification
+        ogce = bfr1ahdr(13)     ! Identification of originating/generating center
+
         call w3fs21(idate5,minobs)
 
 ! Locate satellite id in convinfo file
@@ -260,8 +269,9 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
 ! Check profile quality flags
         if ( ((said > 739).and.(said < 746)).or.(said == 820).or.(said == 786).or. &
              ((said > 749).and.(said < 756)).or.(said == 825).or.(said == 44) .or. &
-              (said == 265).or.(said == 266).or.(said == 267).or.(said == 268).or. & 
-              (said == 269)) then  !CDAAC processing
+              (said >= 265 .and. said <= 269) .or. &
+               ogce == 60                     .or. &  !CDAAC processing
+               ogce == 173   ) then                   !GFZ processing
            if(pcc==zero) then
 !             write(6,*)'READ_GPS:  bad profile said=',said,'ptid=',ptid,&
 !                 ' SKIP this report'
@@ -269,8 +279,9 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
            endif
         endif
 
-        if ((said == 4).or.(said == 3).or.(said == 421).or.(said == 440).or.&
-            (said == 821).or.(said == 5)) then ! GRAS SAF processing
+        if ((said >= 3.and.said <= 5).or.(said == 421).or.(said == 440).or.&
+            (said == 821) .or.(said == 66)) then ! GRAS SAF processing
+
            call upftbv(lnbufr,nemo,qfro,mxib,ibit,nib)
            lone = .false.
              if(nib > 0) then
@@ -296,6 +307,18 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
            endif
         endif
 
+
+! read profile ascending flag 1=ascending
+        ascd = 0
+        call upftbv(lnbufr,nemo,qfro,mxib,ibit,nib)
+        if(nib > 0) then
+           do i=1,nib
+              if(ibit(i)== 3) then
+                 ascd = 1
+                 exit
+              endif
+           enddo
+        endif
 
 ! Read bending angle information
 ! Get the number of occurences of sequence ROSEQ2 in this subset
@@ -345,6 +368,7 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
            nread=nread+1  ! count observations
            rlat=data1b(1,k)  ! earth relative latitude (degrees)
            rlon=data1b(2,k)  ! earth relative longitude (degrees)
+           azim=data1b(3,k)  ! LEO azimuth angle
            height=data2a(1,k)
            ref=data2a(2,k)
            ref_error=data2a(4,k)
@@ -439,7 +463,11 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
               cdata_all(14,ndata)= dlon_earth_deg  ! earth relative longitude (degrees)
               cdata_all(15,ndata)= dlat_earth_deg  ! earth relative latitude (degrees)
               cdata_all(16,ndata)= geoid           ! geoid undulation (m)
-
+              cdata_all(17,ndata)= sclf            ! GNSS satellite classification
+              cdata_all(18,ndata)= siid            ! LEO Satellite instrument
+              cdata_all(19,ndata)= ascd            ! ascending/descending flag
+              cdata_all(20,ndata)= ogce            ! Identification of originating/generating
+              cdata_all(21,ndata)= azim            ! LEO azimuth angle
            else
               notgood = notgood + 1
            end if
