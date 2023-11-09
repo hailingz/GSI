@@ -267,23 +267,8 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
               cycle read_loop
            endif
         endif
- 
-! Check profile quality flags
-        if ( ((said > 739).and.(said < 746)).or.(said == 820).or.(said == 786).or. &
-             ((said > 749).and.(said < 756)).or.(said == 825).or.(said == 44) .or. &
-              (said >= 265 .and. said <= 269) .or. &
-               ogce == 60                     .or. &  !CDAAC processing
-               ogce == 173   ) then                   !GFZ processing
-           if(pcc==zero) then
-!             write(6,*)'READ_GPS:  bad profile said=',said,'ptid=',ptid,&
-!                 ' SKIP this report'
-              cycle read_loop
-           endif
-        endif
 
-        if ((said >= 3.and.said <= 5).or.(said == 421).or.(said == 440).or.&
-            (said == 821) .or.(said == 66)) then ! GRAS SAF processing
-
+!H. ZHANG: use generic profile quality flags
            call upftbv(lnbufr,nemo,qfro,mxib,ibit,nib)
            lone = .false.
              if(nib > 0) then
