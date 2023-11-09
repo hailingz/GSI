@@ -20,7 +20,7 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
 !   2004-01-26  cucurull - replace error estimation, add check for time
 !   2005-03-03  cucurull - reading files in bufr format
 !   2005-03-28  cucurull - reading satellite information from bufr file for diagnostics
-!   2005-06-01  cucurull - update time QC 
+!   2005-06-01  cucurull - update time QC
 !   2005-08-02  derber - modify to use convinfo file
 !   2005-09-08  derber - modify to use input group time window
 !   2005-10-11  treadon - change convinfo read to free format
@@ -47,12 +47,12 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
 !   2009-04-01 cucurull - add QC for Metop/GRAS
 !   2010-05-26 cucurull - add QC flag for Metop/GRAS bending angle
 !                       - modify code to read nested delayed replication to get GRAS
-!                         ionospheric-compensated bending angles 
+!                         ionospheric-compensated bending angles
 !   2010-11-8 cucurull  - skip profile in gpsro bufr when satellite is not
 !                         listed in the convinfo file. Also, remove some QC dependencies
 !                         on the order of the satellites in the convinfo file
 !   2011-01-06 cucurull - replace obstype (gps_ref/gps_bnd) with sis (gps) due to replacing
-!                         gps_ref/gps_bnd with gps in convinfo files 
+!                         gps_ref/gps_bnd with gps in convinfo files
 !   2011-08-24 cucurull - add preliminaty qc flags for C/NOFS, SAC-C, Oceansat-2, METOP-B, SAC-D, and M-T
 !   2012-10-25 cucurull - add qc flag for bnd=0 case
 !   2013-01-26  parrish - change from grdcrd to grdcrd1 (to allow successful debug compile on WCOSS)
@@ -66,6 +66,8 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
 !                         LEO azimuth angle, ascending flag
 !   2021-05-19  H.Zhang - use originating center for QC flag; no need to add satellite id
 !   input argument list:
+!   2021-11-09  H.Zhang - add generic QC flags
+!
 !     infile   - unit from which to read BUFR data
 !     lunout   - unit to which to write data for further processing
 !     obstype  - observation type to process
@@ -103,23 +105,22 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
   integer(i_kind),dimension(npe) ,intent(inout) :: nobs
   integer(i_kind) ,intent(inout) :: nprof_gps
 
-! Declare local parameters  
+! Declare local parameters
   integer(i_kind),parameter:: maxlevs=500
-  integer(i_kind),parameter:: maxinfo=21
+  integer(i_kind),parameter:: maxinfo=23
   real(r_kind),parameter:: r10000=10000.0_r_kind
   real(r_kind),parameter:: r360=360.0_r_kind
 
 ! Declare local variables
   logical good,outside
-  
+
   character(10) nemo
   character(80) hdr1a
   character,dimension(8):: subset
   character(len=16),allocatable,dimension(:):: gpsro_ctype
 
-  
   integer(i_kind) lnbufr,i,k,m,maxobs,ireadmg,ireadsb,said,ptid
-  integer(i_kind) siid,sclf,ogce,ascd
+  integer(i_kind) siid,sclf,ogce,ascd,tinc,qcflag
   integer(i_kind) nmrecs
   integer(i_kind) notgood,idate
   integer(i_kind) iret,levs,levsr,nreps_ROSEQ1,mincy,minobs
@@ -133,7 +134,7 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
 
 
   integer(i_kind),allocatable,dimension(:):: gpsro_itype,gpsro_ikx,nmrecs_id
-  
+
   real(r_kind) timeo,t4dv
   real(r_kind) pcc,qfro,usage,dlat,dlat_earth,dlon,dlon_earth,freq_chk,freq
   real(r_kind) dlat_earth_deg,dlon_earth_deg
@@ -141,18 +142,18 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
                bend_error,ref_error,bend_pccf,ref_pccf,azim
 
   real(r_kind),allocatable,dimension(:,:):: cdata_all
- 
-  integer(i_kind),parameter:: n1ahdr=13
+
+  integer(i_kind),parameter:: n1ahdr=15
   real(r_double),dimension(n1ahdr):: bfr1ahdr
   real(r_double),dimension(50,maxlevs):: data1b
   real(r_double),dimension(50,maxlevs):: data2a
   real(r_double),dimension(maxlevs):: nreps_this_ROSEQ2
- 
+
   data lnbufr/10/
-  data hdr1a / 'YEAR MNTH DAYS HOUR MINU PCCF ELRC SAID SIID PTID GEODU SCLF OGCE'/ 
+  data hdr1a / 'YEAR MNTH DAYS HOUR MINU SECO PCCF ELRC SAID SIID PTID GEODU SCLF OGCE TISE'/
 
   data nemo /'QFRO'/
-  
+
 !***********************************************************************************
 
   maxobs=2e6
@@ -224,15 +225,16 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
         idate5(3) = bfr1ahdr(3) ! day
         idate5(4) = bfr1ahdr(4) ! hour
         idate5(5) = bfr1ahdr(5) ! minute
-        pcc=bfr1ahdr(6)         ! profile per cent confidence
-        roc=bfr1ahdr(7)         ! Earth local radius of curvature
-        said=bfr1ahdr(8)        ! Satellite identifier
-        siid = bfr1ahdr(9)      ! Satellite instrument
-        ptid = bfr1ahdr(10)     ! Platform transmitter ID number
-        geoid= bfr1ahdr(11)     ! Geoid undulation
-        sclf = bfr1ahdr(12)     ! GNSS satellite classification
-        ogce = bfr1ahdr(13)     ! Identification of originating/generating center
-
+        idate5(6) = bfr1ahdr(6) ! seconds
+        pcc=bfr1ahdr(7)         ! profile per cent confidence
+        roc=bfr1ahdr(8)         ! Earth local radius of curvature
+        said=bfr1ahdr(9)        ! Satellite identifier
+        siid = bfr1ahdr(10)      ! Satellite instrument
+        ptid = bfr1ahdr(11)     ! Platform transmitter ID number
+        geoid= bfr1ahdr(12)     ! Geoid undulation
+        sclf = bfr1ahdr(13)     ! GNSS satellite classification
+        ogce = bfr1ahdr(14)     ! Identification of originating/generating center
+        tinc = bfr1ahdr(15)     ! Time increment relative to the start of occultaion
         call w3fs21(idate5,minobs)
 
 ! Locate satellite id in convinfo file
@@ -247,7 +249,7 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
         if (ikx==0) then 
            cycle read_loop
         endif
-   
+ 
 ! check time window in subset
         t4dv=real((minobs-iwinbgn),r_kind)*r60inv
         if (l4dvar.or.l4densvar) then
@@ -298,7 +300,7 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
                     endif
                  endif
                enddo
-             endif 
+             endif
 
            if(lone) then
               write(6,*)'READ_GPS:  bad profile said=',said,'ptid=',ptid,&
@@ -310,6 +312,7 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
 
 ! read profile ascending flag 1=ascending
         ascd = 0
+        qcflag = 0
         call upftbv(lnbufr,nemo,qfro,mxib,ibit,nib)
         if(nib > 0) then
            do i=1,nib
@@ -319,7 +322,11 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
               endif
            enddo
         endif
-
+        if(nib > 0) then
+           do i=1,nib
+              qcflag = qcflag + 2**(16-ibit(i))
+           enddo
+        endif
 ! Read bending angle information
 ! Get the number of occurences of sequence ROSEQ2 in this subset
 ! (will also be the number of replications of sequence ROSEQ1), nreps_ROSEQ1
@@ -331,7 +338,7 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
 
 ! Store entire contents of ROSEQ1 sequence (including contents of nested ROSEQ2 sequence)
 ! in array data1b
-        call ufbseq(lnbufr,data1b,50,maxlevs,levs,'ROSEQ1') 
+        call ufbseq(lnbufr,data1b,50,maxlevs,levs,'ROSEQ1')
 
         if(levs.ne.nreps_ROSEQ1) then
            write(6,*) 'READ_GPS:  **WARNING** said,ptid=',said,ptid,&
@@ -437,8 +444,7 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
 
               ndata  = min(ndata +1,maxobs)
               nodata = min(nodata+1,maxobs)
- 
-       
+
               if (ref_obs) then
                  cdata_all(1,ndata) = ref_error      ! gps ref obs error (units of N)
                  cdata_all(4,ndata) = height         ! geometric height above geoid (m)
@@ -453,7 +459,7 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
               cdata_all(9,ndata) = pcc             ! profile per cent confidence (0 or 100)
               cdata_all(2,ndata) = dlon            ! grid relative longitude
               cdata_all(3,ndata) = dlat            ! grid relative latitude
-              cdata_all(6,ndata) = t4dv            ! time relative to analysis (hour) 
+              cdata_all(6,ndata) = t4dv            ! time relative to analysis (hour)
               cdata_all(7,ndata) = ikx             ! type assigned to ref data
               cdata_all(8,ndata) = nmrecs          ! profile number
               cdata_all(10,ndata)= roc             ! local radius of curvature (m)
@@ -468,6 +474,8 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
               cdata_all(19,ndata)= ascd            ! ascending/descending flag
               cdata_all(20,ndata)= ogce            ! Identification of originating/generating
               cdata_all(21,ndata)= azim            ! LEO azimuth angle
+              cdata_all(22,ndata)= tinc
+              cdata_all(23,ndata)= qcflag
            else
               notgood = notgood + 1
            end if
@@ -484,7 +492,7 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
   write(lunout) obstype,sis,nreal,nchanl,ilat,ilon,nmrecs
   write(lunout) ((cdata_all(k,i),k=1,nreal),i=1,ndata)
   deallocate(cdata_all)
-  
+
 ! Close unit to input file
   call closbf(lnbufr)
   close(lnbufr)
