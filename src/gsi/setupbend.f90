@@ -108,6 +108,10 @@ subroutine setupbend(obsLL,odiagLL, &
 !   2021-11-05  cucurull - update QCs and optimize/improve forward operator; bug fixes
 !   2022-01-28  cucurull - add Sentinel-6, PAZ
 !   2022-04-06  collard  - reintroduce Jacbian QC as an option (default off)
+
+!   2021-03-26  H.Zhang - add model states at obs locations, and observation metadata that are needed in JEDI;
+!                         add QC flags 4 and 5 to specify different QC checks
+!   2021-05-19  H.Zhang - use originating center to specify obs error
 !
 !   input argument list:
 !     lunin    - unit from which to read observations
@@ -147,6 +151,7 @@ subroutine setupbend(obsLL,odiagLL, &
 
   use gsi_4dvar, only: nobs_bins,hr_obsbin
   use guess_grids, only: ges_lnprsi,hrdifsig,geop_hgti,nfldsig
+  use guess_grids, only: ges_tsen,geop_hgtl,ges_lnprsl
   use guess_grids, only: nsig_ext,gpstop,commgpstop,commgpserrinf
   use gridmod, only: nsig
   use gridmod, only: get_ij,latlon11
@@ -226,9 +231,10 @@ subroutine setupbend(obsLL,odiagLL, &
   real(r_kind),dimension(nsig):: dbenddn,dbenddxi
   real(r_kind) pressure,hob_s,d_ref_rad,d_ref_rad_TL,hob_s_top
   real(r_kind),dimension(4) :: w4,dw4,dw4_TL
-  
+
   integer(i_kind) ier,ilon,ilat,ihgt,igps,itime,ikx,iuse, &
                   iprof,ipctc,iroc,isatid,iptid,ilate,ilone,ioff,igeoid
+  integer(i_kind) isclf,iascd,iazim,isiid,iogce
   integer(i_kind) i,j,k,kk,mreal,nreal,jj,ikxx,ibin
   integer(i_kind) mm1,nsig_up,ihob,istatus,nsigstart
   integer(i_kind) kprof,istat,k1,k2,nobs_out,top_layer_SR,bot_layer_SR,count_SR
@@ -263,6 +269,10 @@ subroutine setupbend(obsLL,odiagLL, &
   real(r_kind),allocatable,dimension(:,:,:  ) :: ges_z
   real(r_kind),allocatable,dimension(:,:,:,:) :: ges_tv
   real(r_kind),allocatable,dimension(:,:,:,:) :: ges_q
+
+  integer,     dimension(nobs)                :: qcfail_8km
+  real(r_kind),dimension(nsig,  nobs)         :: Tsen,Tvir,sphm,hgtl,prslnl
+  real(r_kind),dimension(nsig+1,nobs)         :: hgti,prslni
 
   type(obsLList),pointer,dimension(:):: gpshead
   logical:: commdat
@@ -300,7 +310,7 @@ subroutine setupbend(obsLL,odiagLL, &
 !267 => PlanetiQ GNOMES-A
 !268 => PlanetiQ GNOMES-B
 !269 => Spire Lemur 3U CubeSat
-!66 => Sentinel-6 
+!66 => Sentinel-6
 
 ! Check to see if required guess fields are available
   call check_vars_(proceed)
@@ -328,12 +338,17 @@ subroutine setupbend(obsLL,odiagLL, &
   ilone=14     ! index of earth relative longitude (degrees)
   ilate=15     ! index of earth relative latitude (degrees)
   igeoid=16    ! index of geoid undulation (a value per profile, m) 
+  isclf=17     ! index of GNSS satellite classification
+  isiid=18     ! index of LEO Satellite instrument
+  iascd=19     ! index of ascending/descending flag
+  iogce=20     ! index of identification of originating/generating
+  iazim=21     ! index of LEO azimuth angle
 
 ! Intialize variables
   nsig_up=nsig+nsig_ext ! extend nsig_ext levels above interface level nsig
-  rsig=real(nsig,r_kind)
+  rsig=float(nsig)
   rdog=rd/grav
-  rsig_up=real(nsig_up,r_kind)
+  rsig_up=float(nsig_up)
   nobs_out=0
   hob_s_top=one
   mm1=mype+1
@@ -345,7 +360,7 @@ subroutine setupbend(obsLL,odiagLL, &
   allocate(ddnj(grids_dim),grid_s(grids_dim),ref_rad_s(grids_dim)) 
 
 ! Allocate arrays for output to diagnostic file
-  mreal=22
+  mreal=29
   nreal=mreal
   if (lobsdiagsave) nreal=nreal+4*miter+1
   if (save_jacobian) then
@@ -400,7 +415,8 @@ subroutine setupbend(obsLL,odiagLL, &
      qcfail_loc=zero;qcfail_gross=zero
      qcfail_high=zero
      qcfail_jac=zero
-     toss_gps_sub=zero 
+     toss_gps_sub=zero
+     qcfail_8km=zero
      dbend_loc=zero
 
   else ! (init_pass)
@@ -421,9 +437,9 @@ subroutine setupbend(obsLL,odiagLL, &
 ! A loop over all obs.
   call dtime_setup()
   loopoverobs1: &
-  do i=1,nobs ! loop over obs 
+  do i=1,nobs ! loop over obs
      dtime=data(itime,i)
-     obs_check=.false. 
+     obs_check=.false.
 
      call dtime_check(dtime, in_curbin, in_anybin)
      if(.not.in_anybin) cycle   ! not interested, not even for ibin
@@ -438,7 +454,7 @@ subroutine setupbend(obsLL,odiagLL, &
      tpdpres(i)=data(ihgt,i)
      ikx=nint(data(ikxx,i))
 
-!    Interpolate log(pres),temperature,specific humidity, 
+!    Interpolate log(pres),temperature,specific humidity,
 !    corrected geopotential heights and topography to obs location
      call tintrp2a1(ges_lnprsi,prsltmp,dlat,dlon,dtime,hrdifsig,&
           nsig+1,mype,nfldsig)
@@ -452,6 +468,21 @@ subroutine setupbend(obsLL,odiagLL, &
           mype,nfldsig)
 
      prsltmp_o(1:nsig,i)=prsltmp(1:nsig) ! needed in minimization
+
+!    Interpolate mid-level log(pres),mid-level geopotential height,
+!    and air temperature for JEDI
+     call tintrp2a1(ges_tsen,  Tsen(1:nsig,i),  dlat,dlon,dtime,hrdifsig, &
+                    nsig, mype,nfldsig)
+     call tintrp2a1(geop_hgtl, hgtl(1:nsig,i),  dlat,dlon,dtime,hrdifsig, &
+                    nsig, mype,nfldsig)
+     call tintrp2a1(ges_lnprsl,prslnl(1:nsig,i),dlat,dlon,dtime,hrdifsig, &
+                    nsig, mype,nfldsig)
+
+     Tvir(1:nsig,i)      = tges(1:nsig)            ! virtual temperature
+     sphm(1:nsig,i)      = qges(1:nsig)            ! specific humidity
+     hgtl(1:nsig,i)      = hgtl(1:nsig,i) + zsges  ! mid level geopotential height
+     hgti(1:nsig+1,i)    = hges(1:nsig+1) + zsges  ! interface level geopotential height
+     prslni(1:nsig+1,i)  = prsltmp(1:nsig+1)       ! interface level log(pressure)
 
 ! Compute refractivity index-radius product at interface
 !
@@ -569,10 +600,11 @@ subroutine setupbend(obsLL,odiagLL, &
      rdiagbuf(:,i)         = zero
 
      rdiagbuf(1,i)         = ictype(ikx)        ! observation type
-     rdiagbuf(20,i)        = one                ! uses gps_ref (one = use of bending angle)
+!    rdiagbuf(20,i)        = one                ! uses gps_ref (one = use of bending angle)
      rdiagbuf(2,i)         = data(iprof,i)      ! profile identifier
      rdiagbuf(3,i)         = data(ilate,i)      ! lat in degrees
      rdiagbuf(4,i)         = data(ilone,i)      ! lon in degrees
+     rdiagbuf(5,i)         = one ! see bending_angle@GsiHofX in genstat_gps for why
      rdiagbuf(7,i)         = tpdpres(i)-rocprof ! impact height in meters
 !    rdiagbuf(7,i)         = tpdpres(i)         ! impact parameter in meters
      rdiagbuf(8,i)         = dtime-time_offset  ! obs time (hours relative to analysis time)
@@ -582,11 +614,20 @@ subroutine setupbend(obsLL,odiagLL, &
      rdiagbuf(17,i)        = data(igps,i)       ! bending angle observation (radians)
      rdiagbuf(19,i)        = hob                ! model vertical grid (interface) if monotone grid
      rdiagbuf(22,i)        = 1.e+10_r_kind      ! spread (filled in by EnKF)
+!    extra metadata needed in JEDI
+     rdiagbuf(23,i)        = data(igeoid,i)
+     rdiagbuf(24,i)        = rocprof
+     rdiagbuf(25,i)        = data(iptid,i)
+     rdiagbuf(26,i)        = data(isclf,i)
+     rdiagbuf(27,i)        = data(iascd,i)
+     rdiagbuf(28,i)        = data(iogce,i)
+     rdiagbuf(29,i)        = data(isiid,i)
+     rdiagbuf(20,i)        = data(iazim,i)
 
      if(ratio_errors(i) > tiny_r_kind)  then ! obs inside model grid
 
        if (alt <= five) then
-          if (top_layer_SR >= 1) then ! SR exists for at least one layer. Check if obs is inside                                                                       
+          if (top_layer_SR >= 1) then ! SR exists for at least one layer. Check if obs is inside           
              if ((tpdpres(i)<ref_rad(top_layer_SR+1)) .and. &
                     (tpdpres(i)<ref_rad(bot_layer_SR))) then !obs below model SR/close-to-SR layer
                     qcfail(i)=.true.
@@ -618,7 +659,7 @@ subroutine setupbend(obsLL,odiagLL, &
        ihob=hob
        k1=min(max(1,ihob),nsig)
        k2=max(1,min(ihob+1,nsig))
-       delz=hob-real(k1,r_kind)
+       delz=hob-float(k1)
        delz=max(zero,min(delz,one))
        trefges=tges_o(k1,i)*(one-delz)+tges_o(k2,i)*delz
        qrefges=qges_o(k1)*(one-delz)+qges_o(k2)*delz !Lidia
@@ -630,22 +671,22 @@ subroutine setupbend(obsLL,odiagLL, &
        if (data(isatid,i)>=265 .and. data(isatid,i)<=269) commdat=.true.
        if (.not. qcfail(i)) then ! not SR
 
-!        Modify error to account for representativeness error. 
+!        Modify error to account for representativeness error.
          repe_gps=one
 
 !        UKMET-type processing
          if((data(isatid,i)==41) .or.(data(isatid,i)==722).or. &
-            (data(isatid,i)==723).or.(data(isatid,i)==4)  .or. & 
+            (data(isatid,i)==723).or.(data(isatid,i)==4)  .or. &
             (data(isatid,i)==42) .or.(data(isatid,i)==3)  .or. &
             (data(isatid,i)==821).or.(data(isatid,i)==421).or. &
             (data(isatid,i)==440).or.(data(isatid,i)==43) .or. &
             (data(isatid,i)==5).or.(data(isatid,i)==66)) then
-                    
+
            if((data(ilate,i)> r40).or.(data(ilate,i)< -r40)) then
               if(alt>r12) then
                 repe_gps=0.19032_r_kind+0.287535_r_kind*alt-0.00260813_r_kind*alt**2
               else
-                repe_gps=-3.20978_r_kind+1.26964_r_kind*alt-0.0622538_r_kind*alt**2 
+                repe_gps=-3.20978_r_kind+1.26964_r_kind*alt-0.0622538_r_kind*alt**2
               endif
            else
               if(alt>r18) then
@@ -654,7 +695,7 @@ subroutine setupbend(obsLL,odiagLL, &
                 repe_gps=-2.41024_r_kind+0.806594_r_kind*alt-0.027257_r_kind*alt**2
               endif
            endif
-         else 
+         else
 !        CDAAC-type processing
            if (((data(isatid,i) > 749).and.(data(isatid,i) < 756)).or.commdat) then
               if ((data(ilate,i)> r40).or.(data(ilate,i)< -r40)) then
