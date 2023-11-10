@@ -246,10 +246,10 @@ subroutine read_gps(nread,ndata,nodata,infile,lunout,obstype,twind, &
               exit find_loop
            endif
         end do find_loop
-        if (ikx==0) then 
+        if (ikx==0) then
            cycle read_loop
         endif
- 
+
 ! check time window in subset
         t4dv=real((minobs-iwinbgn),r_kind)*r60inv
         if (l4dvar.or.l4densvar) then

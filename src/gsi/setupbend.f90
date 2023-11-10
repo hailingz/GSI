@@ -614,7 +614,6 @@ subroutine setupbend(obsLL,odiagLL, &
      rdiagbuf(:,i)         = zero
 
      rdiagbuf(1,i)         = ictype(ikx)        ! observation type
-!    rdiagbuf(20,i)        = one                ! uses gps_ref (one = use of bending angle)
      rdiagbuf(2,i)         = data(iprof,i)      ! profile identifier
      rdiagbuf(3,i)         = data(ilate,i)      ! lat in degrees
      rdiagbuf(4,i)         = data(ilone,i)      ! lon in degrees
@@ -646,18 +645,20 @@ subroutine setupbend(obsLL,odiagLL, &
           if (top_layer_SR >= 1) then ! SR exists for at least one layer. Check if obs is inside
              if ((tpdpres(i)<ref_rad(top_layer_SR+1)) .and. &
                     (tpdpres(i)<ref_rad(bot_layer_SR))) then !obs below model SR/close-to-SR layer
+                    qc_superr(i)=1
                     qcfail(i)=.true.
              elseif (tpdpres(i)>ref_rad(top_layer_SR+5)) then ! obs above SR/close-to-SR layer
                     qcfail(i)=.false.
-                    if(hob < top_layer_SR+1) then !location might be aliased to the lower section of the non-monotonicity 
+                    if(hob < top_layer_SR+1) then !location might be aliased to the lower section of the non-monotonicity
                       hob = tpdpres(i)
-                      call grdcrd1(hob,ref_rad(top_layer_SR+1),nsig-top_layer_SR-1,1) ! only non-monotonic section above SR layer 
+                      call grdcrd1(hob,ref_rad(top_layer_SR+1),nsig-top_layer_SR-1,1) ! only non-monotonic section above SR layer
                       data(ihgt,i) = hob+top_layer_SR
                       hob = hob+top_layer_SR
                       rdiagbuf(19,i) = hob
                     endif
-             else ! obs inside model SR/shadow or close-to-SR layer                                                                                                     
+             else ! obs inside model SR/shadow or close-to-SR layer
                     qcfail(i)=.true.
+                    qc_superr(i)=1
              endif
           endif
 
@@ -665,8 +666,9 @@ subroutine setupbend(obsLL,odiagLL, &
           if ( data(igps,i) >= 0.03_r_kind .and. qc_layer_SR) then
              kprof = data(iprof,i)
              toss_gps_sub(kprof) = max (toss_gps_sub(kprof),data(igps,i))
+             qc_layer(i)=1
           endif
-       endif 
+       endif
 
        alt=(tpdpres(i)-rocprof)*r1em3
 !      get pressure (in mb), temperature and moisture at obs location
@@ -811,6 +813,7 @@ subroutine setupbend(obsLL,odiagLL, &
               ddnj(j)=dot_product(dw4,nrefges(ihob-1:ihob+2,i))!derivative (dN/dx)_j                                                                      
               if(ddnj(j)>zero) then
                  qcfail(i)=.true.
+                 qc_ddnj(i)=1
                  data(ier,i) = zero
                  ratio_errors(i) = zero
                  muse(i)=.false.
@@ -859,6 +862,7 @@ subroutine setupbend(obsLL,odiagLL, &
          if(dbend > 0.05_r_kind) then
            data(ier,i) = zero
            ratio_errors(i) = zero
+           qc_largeBA(i)=1
            qcfail(i)=.true.
            muse(i)=.false.
          endif
@@ -925,9 +929,10 @@ subroutine setupbend(obsLL,odiagLL, &
                    else
                       cutoff=three*cutoff*r0_01
                    end if
- 
+
                    if(abs(rdiagbuf(5,i)) > cutoff) then
                       qcfail(i)=.true.
+                      qc_stat(i)=1
                       data(ier,i) = zero
                       ratio_errors(i) = zero
                       muse(i) = .false.
@@ -947,6 +952,7 @@ subroutine setupbend(obsLL,odiagLL, &
          if( (alt <= eight) .and. &
             ((data(isatid,i)==4).or.(data(isatid,i)==3).or.(data(isatid,i)==5))) then
            qcfail(i)=.true.
+           qc_metop(i)=1
            data(ier,i) = zero
            ratio_errors(i) = zero
            muse(i)=.false.
@@ -1000,14 +1006,17 @@ subroutine setupbend(obsLL,odiagLL, &
         if (ratio_errors(i)*data(ier,i) <= tiny_r_kind) muse(i) = .false.
         ikx=nint(data(ikxx,i))
 
- 
         ! flags for observations that failed qc checks
         ! zero = observation is good
- 
         if(qcfail_gross(i) == one)   rdiagbuf(10,i) = three
         if(qcfail(i))                rdiagbuf(10,i) = four !modified in genstats due to toss_gps_sub
         if(qcfail_loc(i) == one)     rdiagbuf(10,i) = one
         if(qcfail_high(i) == one)    rdiagbuf(10,i) = two
+        if(qc_superr(i) == 1)        rdiagbuf(10,i) = 7 ! print out SR
+        if(qc_stat(i) == 1)          rdiagbuf(10,i) = 10 ! print out cutoff
+        if(qc_ddnj(i) == 1)          rdiagbuf(10,i) = 9 ! print out ddnj>0
+        if(qc_largeBA(i) == 1)       rdiagbuf(10,i) = 11 ! print out large BA
+        if(qc_metop(i) == 1)         rdiagbuf(10,i) = 12 ! print out metop 8 km
 
         if(muse(i)) then                    ! modified in genstats_gps due to toss_gps_sub
            rdiagbuf(12,i) = one             ! minimization usage flag (1=use, -1=not used)
@@ -1083,6 +1092,28 @@ subroutine setupbend(obsLL,odiagLL, &
         gps_alltail(ibin)%head%iob=ioid(i)
         gps_alltail(ibin)%head%elat= data(ilate,i)
         gps_alltail(ibin)%head%elon= data(ilone,i)
+
+!       2 dimensional geovals for JEDI
+        allocate(gps_alltail(ibin)%head%tvirges(nsig),stat=istatus)
+        allocate(gps_alltail(ibin)%head%tsenges(nsig),stat=istatus)
+        allocate(gps_alltail(ibin)%head%sphmges(nsig),stat=istatus)
+        allocate(gps_alltail(ibin)%head%hgtlges(nsig),stat=istatus)
+        allocate(gps_alltail(ibin)%head%hgtiges(nsig+1),stat=istatus)
+        allocate(gps_alltail(ibin)%head%prsiges(nsig+1),stat=istatus)
+        allocate(gps_alltail(ibin)%head%prslges(nsig),stat=istatus)
+
+        do j= 1, nsig
+          gps_alltail(ibin)%head%tvirges(j)  = Tvir(j,i)
+          gps_alltail(ibin)%head%tsenges(j)  = Tsen(j,i)
+          gps_alltail(ibin)%head%sphmges(j)  = sphm(j,i)
+          gps_alltail(ibin)%head%hgtlges(j)  = hgtl(j,i)
+          gps_alltail(ibin)%head%prslges(j)  = 1000.0*exp(prslnl(j,i))
+        end do
+
+        do j= 1, nsig + 1
+          gps_alltail(ibin)%head%hgtiges(j)  = hgti(j,i)
+          gps_alltail(ibin)%head%prsiges(j)  = 1000.0*exp(prslni(j,i))
+        end do
 
         allocate(gps_alltail(ibin)%head%rdiag(nreal),stat=istatus)
         if (istatus/=0) write(6,*)'SETUPBEND:  allocate error for gps_alldiag, istatus=',istatus
