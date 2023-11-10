@@ -235,6 +235,7 @@ subroutine setupbend(obsLL,odiagLL, &
   integer(i_kind) ier,ilon,ilat,ihgt,igps,itime,ikx,iuse, &
                   iprof,ipctc,iroc,isatid,iptid,ilate,ilone,ioff,igeoid
   integer(i_kind) isclf,iascd,iazim,isiid,iogce
+  integer(i_kind) itoff,iqcfl
   integer(i_kind) i,j,k,kk,mreal,nreal,jj,ikxx,ibin
   integer(i_kind) mm1,nsig_up,ihob,istatus,nsigstart
   integer(i_kind) kprof,istat,k1,k2,nobs_out,top_layer_SR,bot_layer_SR,count_SR
@@ -245,7 +246,8 @@ subroutine setupbend(obsLL,odiagLL, &
   integer(i_kind) :: iz, t_ind, q_ind, p_ind, nnz, nind
 
   real(r_kind),dimension(3,nsig+nsig_ext) :: q_w,q_w_tl
-  real(r_kind),dimension(nsig) :: hges,irefges,zges,dhdt,dhdp
+  real(r_kind),dimension(nsig) :: irefges,zges,dhdt,dhdp
+  real(r_kind),dimension(nsig+1) :: hges
   real(r_kind),dimension(nsig+1) :: prsltmp
   real(r_kind),dimension(nsig,nsig)::dndp,dxidp
   real(r_kind),dimension(nsig,nsig)::dndt,dxidt,dndq,dxidq
@@ -271,6 +273,8 @@ subroutine setupbend(obsLL,odiagLL, &
   real(r_kind),allocatable,dimension(:,:,:,:) :: ges_q
 
   integer,     dimension(nobs)                :: qcfail_8km
+  integer(i_kind),dimension(nobs)             :: qc_superr, qc_layer, qc_ddnj
+  integer(i_kind),dimension(nobs)             :: qc_stat,qc_largeBA,qc_metop
   real(r_kind),dimension(nsig,  nobs)         :: Tsen,Tvir,sphm,hgtl,prslnl
   real(r_kind),dimension(nsig+1,nobs)         :: hgti,prslni
 
@@ -337,12 +341,16 @@ subroutine setupbend(obsLL,odiagLL, &
   iuse=13      ! index of use parameter
   ilone=14     ! index of earth relative longitude (degrees)
   ilate=15     ! index of earth relative latitude (degrees)
-  igeoid=16    ! index of geoid undulation (a value per profile, m) 
+  igeoid=16    ! index of geoid undulation (a value per profile, m)
   isclf=17     ! index of GNSS satellite classification
   isiid=18     ! index of LEO Satellite instrument
   iascd=19     ! index of ascending/descending flag
   iogce=20     ! index of identification of originating/generating
   iazim=21     ! index of LEO azimuth angle
+  itoff=22
+  iqcfl=23
+
+  !kprof = 0   ! initialize kprof otherwise it is assigned as 787086608
 
 ! Intialize variables
   nsig_up=nsig+nsig_ext ! extend nsig_ext levels above interface level nsig
@@ -357,15 +365,15 @@ subroutine setupbend(obsLL,odiagLL, &
   ns=r80
   grids_dim=nint(ns)  ! grid points for integration of GPS bend
   ds=r10000
-  allocate(ddnj(grids_dim),grid_s(grids_dim),ref_rad_s(grids_dim)) 
+  allocate(ddnj(grids_dim),grid_s(grids_dim),ref_rad_s(grids_dim))
 
 ! Allocate arrays for output to diagnostic file
-  mreal=29
+  mreal=31
   nreal=mreal
   if (lobsdiagsave) nreal=nreal+4*miter+1
   if (save_jacobian) then
     nnz = nsig * 3         ! number of non-zero elements in dH(x)/dx profile
-    nind   = 3             ! number of dense subarrays 
+    nind   = 3             ! number of dense subarrays
     call new(dhx_dx, nnz, nind)
     nreal = nreal + size(dhx_dx)
     ! jacobian sparse array indices are the same for all obs and can be filled
@@ -418,6 +426,12 @@ subroutine setupbend(obsLL,odiagLL, &
      toss_gps_sub=zero
      qcfail_8km=zero
      dbend_loc=zero
+     qc_superr(:) = 0
+     qc_stat(:) = 0
+     qc_largeBA(:) = 0
+     qc_layer(:) = 0
+     qc_ddnj(:) = 0
+     kprof = 0   ! initialize kprof otherwise it is assigned as 787086608
 
   else ! (init_pass)
 
@@ -623,11 +637,13 @@ subroutine setupbend(obsLL,odiagLL, &
      rdiagbuf(28,i)        = data(iogce,i)
      rdiagbuf(29,i)        = data(isiid,i)
      rdiagbuf(20,i)        = data(iazim,i)
+     rdiagbuf(30,i)        = data(itoff,i)
+     rdiagbuf(31,i)        = data(iqcfl,i)
 
      if(ratio_errors(i) > tiny_r_kind)  then ! obs inside model grid
 
        if (alt <= five) then
-          if (top_layer_SR >= 1) then ! SR exists for at least one layer. Check if obs is inside           
+          if (top_layer_SR >= 1) then ! SR exists for at least one layer. Check if obs is inside
              if ((tpdpres(i)<ref_rad(top_layer_SR+1)) .and. &
                     (tpdpres(i)<ref_rad(bot_layer_SR))) then !obs below model SR/close-to-SR layer
                     qcfail(i)=.true.
@@ -737,7 +753,7 @@ subroutine setupbend(obsLL,odiagLL, &
          repe_gps= r1em3*(one/abs(repe_gps)) ! modified error in rad
          if (commdat) repe_gps=commgpserrinf*repe_gps ! Inflate error for commercial data
          ratio_errors(i) = data(ier,i)/abs(repe_gps)
-  
+
          error(i)=one/data(ier,i) ! one/original error
          data(ier,i)=one/data(ier,i) ! one/original error
          error_adjst(i)= ratio_errors(i)* data(ier,i) !one/adjusted error
@@ -919,7 +935,7 @@ subroutine setupbend(obsLL,odiagLL, &
                end if !gross qc check
             end if ! commdat < commgpstop
          end if ! qc checks (only below 50km)
-!        Remove obs above 50 km  
+!        Remove obs above 50 km
          if((alt > gpstop) .or. (commdat .and. (alt > commgpstop))) then
            data(ier,i) = zero
            ratio_errors(i) = zero
@@ -928,7 +944,7 @@ subroutine setupbend(obsLL,odiagLL, &
          endif
 
 !       Remove MetOP/GRAS data below 8 km
-         if( (alt <= eight) .and. & 
+         if( (alt <= eight) .and. &
             ((data(isatid,i)==4).or.(data(isatid,i)==3).or.(data(isatid,i)==5))) then
            qcfail(i)=.true.
            data(ier,i) = zero
