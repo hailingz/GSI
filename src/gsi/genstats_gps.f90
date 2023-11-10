@@ -772,35 +772,35 @@ subroutine contents_netcdf_diag_
 
   if (gps_allptr%rdiag(16) /= 0.0 )  obserr = 1.0/gps_allptr%rdiag(16)
 
-           call nc_diag_metadata("reference_sat_id",            int(gps_allptr%rdiag(25))  )
-           call nc_diag_metadata("occulting_sat_id@MetaData",   int(gps_allptr%rdiag(1))   )
-           call nc_diag_metadata("occulting_sat_is@MetaData",   int(gps_allptr%rdiag(29))  )
-           call nc_diag_metadata("gnss_sat_class@MetaData",     int(gps_allptr%rdiag(26))  )
-           call nc_diag_metadata("process_center@MetaData",     int(gps_allptr%rdiag(28))  )
-           call nc_diag_metadata("record_number@MetaData",      int(gps_allptr%rdiag(2))   )
-           call nc_diag_metadata("ascending_flag@MetaData",     int(gps_allptr%rdiag(27))  )
-           call nc_diag_metadata("timeOffset@MetaData",         int(gps_allptr%rdiag(28))  )
-           call nc_diag_metadata("qualityFlags@MetaData",       int(gps_allptr%rdiag(29))  )
-           call nc_diag_metadata("latitude@MetaData",           sngl(gps_allptr%rdiag(3)) )
-           call nc_diag_metadata("longitude@MetaData",          sngl(gps_allptr%rdiag(4)) )
-           call nc_diag_metadata("time@MetaData",               sngl(gps_allptr%rdiag(8)) )
-           call nc_diag_metadata("impact_height@MetaData",      sngl(gps_allptr%rdiag(7)) )
-           call nc_diag_metadata("impact_parameter@MetaData",   sngl(gps_allptr%rdiag(7)) + sngl(gps_allptr%rdiag(24)) )
-           call nc_diag_metadata("geoid_height_above_reference_ellipsoid@MetaData", sngl(gps_allptr%rdiag(23)) )
-           call nc_diag_metadata("earth_radius_of_curvature@MetaData",               sngl(gps_allptr%rdiag(24)) )
-           call nc_diag_metadata("sensor_azimuth_angle@MetaData",         sngl(gps_allptr%rdiag(20)) )
-           call nc_diag_metadata("air_pressure_at_Obs_Location@MetaData", sngl(gps_allptr%rdiag(6)) )
-           call nc_diag_metadata("bending_angle@ObsValue",                sngl(gps_allptr%rdiag(17)) ) !need change
-           call nc_diag_metadata("bending_angle@ObsError",                real(obserr,4))
-           call nc_diag_metadata("bending_angle@PreQC",                   int(gps_allptr%rdiag(10)) )
-           call nc_diag_metadata("bending_angle@GsiHofX",                 &
+           call nc_diag_metadata("satelliteTransmitterId@MetaData",  int(gps_allptr%rdiag(25))  )
+           call nc_diag_metadata("satelliteIdentifier@MetaData",     int(gps_allptr%rdiag(1))   )
+           call nc_diag_metadata("instrumentIdentifier@MetaData",    int(gps_allptr%rdiag(29))  )
+           call nc_diag_metadata("satelliteConstellationRO@MetaData",int(gps_allptr%rdiag(26))  )
+           call nc_diag_metadata("dataProviderOriginr@MetaData",     int(gps_allptr%rdiag(28))  )
+           call nc_diag_metadata("sequenceNumber@MetaData",          int(gps_allptr%rdiag(2))   )
+           call nc_diag_metadata("satelliteAscendingFlag@MetaData",  int(gps_allptr%rdiag(27))  )
+           call nc_diag_metadata("timeOffset@MetaData",           int(gps_allptr%rdiag(28))  )
+           call nc_diag_metadata("qualityFlags@MetaData",         int(gps_allptr%rdiag(29))  )
+           call nc_diag_metadata("latitude@MetaData",             sngl(gps_allptr%rdiag(3)) )
+           call nc_diag_metadata("longitude@MetaData",            sngl(gps_allptr%rdiag(4)) )
+           call nc_diag_metadata("time@MetaData",                 sngl(gps_allptr%rdiag(8)) )
+           call nc_diag_metadata("impactHeightRO@MetaData",       sngl(gps_allptr%rdiag(7)) )
+           call nc_diag_metadata("impactParameterRO@MetaData",    sngl(gps_allptr%rdiag(7)) + sngl(gps_allptr%rdiag(24)) )
+           call nc_diag_metadata("geoidUndulation@MetaData",      sngl(gps_allptr%rdiag(23)) )
+           call nc_diag_metadata("earthRadiusCurvature@MetaData", sngl(gps_allptr%rdiag(24)) )
+           call nc_diag_metadata("sensorAzimuthAngle@MetaData",   sngl(gps_allptr%rdiag(20)) )
+           call nc_diag_metadata("pressures@MetaData",            sngl(gps_allptr%rdiag(6)) )
+           call nc_diag_metadata("bendingAngle@ObsValue",                sngl(gps_allptr%rdiag(17)) ) !need change
+           call nc_diag_metadata("bendingAngle@ObsError",                real(obserr,4))
+           call nc_diag_metadata("bendingAngle@PreQC",                   int(gps_allptr%rdiag(10)) )
+           call nc_diag_metadata("bendingAngle@GsiHofX",                 &
                                   real(gps_allptr%rdiag(17)*(one-sngl(gps_allptr%rdiag(5))), 4) ) !need change
 
-           call nc_diag_metadata("bending_angle@GsiAdjustObsErrorInv",    sngl(gps_allptr%rdiag(15)) )
-           call nc_diag_metadata("bending_angle@GsiFinalObsErrorInv",     sngl(gps_allptr%rdiag(16)) )
-           call nc_diag_metadata("Temperature_at_Obs_Location",           sngl(gps_allptr%rdiag(18)) )
-           call nc_diag_metadata("Specific_Humidity_at_Obs_Location",     sngl(gps_allptr%rdiag(21)) )
-           call nc_diag_metadata("Prep_Use_Flag@MetaData",                sngl(gps_allptr%rdiag(11)) )
+           call nc_diag_metadata("bendingAngle@GsiAdjustObsErrorInv",    sngl(gps_allptr%rdiag(15)) )
+           call nc_diag_metadata("bendingAngle@GsiFinalObsErrorInv",     sngl(gps_allptr%rdiag(16)) )
+           call nc_diag_metadata("temperature",           sngl(gps_allptr%rdiag(18)) )
+           call nc_diag_metadata("specificHumidity",     sngl(gps_allptr%rdiag(21)) )
+           call nc_diag_metadata("PrepUseFlag@MetaData",                sngl(gps_allptr%rdiag(11)) )
            call nc_diag_metadata("Nonlinear_QC_Rel_Wgt@MetaData",         sngl(gps_allptr%rdiag(13)) )
 
 !          geovals
@@ -810,8 +810,8 @@ subroutine contents_netcdf_diag_
            call nc_diag_data2d("specific_humidity",           sngl(gps_allptr%sphmges) )
            call nc_diag_data2d("geopotential_height",         sngl(gps_allptr%hgtlges) )
            call nc_diag_data2d("geopotential_height_levels",  sngl(gps_allptr%hgtiges) )
-           call nc_diag_data2d("air_pressure_levels",         sngl(gps_allptr%prsiges) )
-           call nc_diag_data2d("air_pressure",                sngl(gps_allptr%prslges) )
+           call nc_diag_data2d("pressure_levels",         sngl(gps_allptr%prsiges) )
+           call nc_diag_data2d("pressure",                sngl(gps_allptr%prslges) )
 
            if (save_jacobian) then
               call readarray(dhx_dx, gps_allptr%rdiag(ioff+1:nreal))
